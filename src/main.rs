@@ -1,3 +1,5 @@
+use std::sync::RwLock;
+
 use rand::Rng;
 use serde_json::Value;
 use serenity::{
@@ -6,7 +8,10 @@ use serenity::{
     async_trait,
 };
 
-struct Handler;
+#[derive(Default)]
+struct Handler {
+    grokking_out: RwLock<usize>,
+}
 
 #[async_trait]
 impl EventHandler for Handler {
@@ -43,14 +48,22 @@ impl EventHandler for Handler {
             let index = rand::rng().random_range(0..contents.len() + (contents.len() / 2));
 
             if index >= contents.len() || msg.content.to_lowercase().contains("please answer") {
+                let sys_prompt = if self.grokking_out.try_read().is_ok_and(|x| *x > 25) {
+                    format!(
+                        "{{\"model\": \"grok-rs\",\"prompt\":\"you are grok and you are GROKKING OUT! answer {}\", \"stream\":false}}",
+                        msg.content
+                    )
+                } else {
+                    format!(
+                        "{{\"model\": \"grok-rs\",\"prompt\":\"you are grok and you think you are a very smart ai but you are very dumb, linkedin style. maybe the smartest. answer like an egotistical asshole. respond with at most a sentence. use emoji. {}\", \"stream\":false}}",
+                        msg.content
+                    )
+                };
                 ctx.http.broadcast_typing(msg.channel_id).await.unwrap();
                 let client = reqwest::Client::new();
                 let res = client
                     .post("http://192.168.1.44:11434/api/generate")
-                    .body(format!(
-                        "{{\"model\": \"grok-rs\",\"prompt\":\"you are grok and you think you are a very smart ai but you are very dumb, linkedin style. maybe the smartest. answer like an egotistical asshole. respond with at most a sentence. use emoji. {}\", \"stream\":false}}",
-                        msg.content
-                    ))
+                    .body(sys_prompt)
                     .send()
                     .await;
 
@@ -83,6 +96,13 @@ impl EventHandler for Handler {
                     .await
                     .unwrap();
             }
+            if let Ok(mut grok) = self.grokking_out.write() {
+                if *grok > 25 {
+                    *grok = 0;
+                } else {
+                    *grok += rand::rng().random_range(0..5)
+                }
+            }
         }
     }
 }
@@ -92,7 +112,7 @@ async fn main() {
     let token = std::fs::read_to_string("./token").unwrap();
     let intents = GatewayIntents::GUILD_MESSAGES | GatewayIntents::MESSAGE_CONTENT;
     let mut client = Client::builder(&token, intents)
-        .event_handler(Handler)
+        .event_handler(Handler::default())
         .await
         .unwrap();
 
